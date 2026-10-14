@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid Search Playground: BM25 vs vector vs hybrid search</title>
+  <meta name="description" content="See how BM25 keyword search, vector (embedding) search and hybrid fusion rank the same documents, and why. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23134e4a'/%3E%3Crect x='6' y='8' width='12' height='4' rx='2' fill='%23f59e0b'/%3E%3Crect x='6' y='14' width='18' height='4' rx='2' fill='%238b5cf6'/%3E%3Crect x='6' y='20' width='15' height='4' rx='2' fill='%2314b8a6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"><i class="c-bm25"></i><i class="c-vec"></i><i class="c-hyb"></i></span>
+    <div>
+      <h1>Hybrid Search Playground</h1>
+      <p class="tagline">Compare BM25, vector and hybrid search on the same documents, and see why each one ranked them that way.</p>
+    </div>
+  </div>
+  <nav>
+    <a href="#playground">Playground</a>
+    <a href="#about">What is this tool for?</a>
+    <a href="#howto">How to use this tool</a>
+    <a href="#scoring">How the scoring works</a>
+  </nav>
+</header>
+
+<div class="privacy-note" data-tip="Your documents are processed by JavaScript on this page, on your own computer.&#10;They are never uploaded. The only download is the optional embedding model (from the jsDelivr and Hugging Face CDNs), and it only happens when you click the load button.">
+  Everything runs in your browser. Documents you paste or open never leave your device.
+</div>
+
+<main id="playground" class="playground">
+  <!-- ============ LEFT: inputs ============ -->
+  <section class="panel inputs" aria-label="Inputs">
+    <h2>Inputs</h2>
+
+    <label class="field-label" for="dataset">Dataset <span class="help" data-tip="Pick a ready-made sample, or choose &quot;My documents&quot; to paste or open your own.&#10;Each sample is built to teach one thing about search.">?</span></label>
+    <select id="dataset"></select>
+    <p id="dataset-lesson" class="lesson"></p>
+
+    <div class="row between">
+      <label class="field-label" for="docs">Documents <span class="help" data-tip="The text to search. How it is split into separate documents depends on &quot;Split by&quot; below.&#10;Editing a sample turns it into &quot;My documents&quot;.">?</span></label>
+      <span id="doc-count" class="muted small" data-tip="How many documents were found after splitting the text.">0 docs</span>
+    </div>
+    <textarea id="docs" rows="10" spellcheck="false" placeholder="Paste documents here. Leave a blank line between documents."></textarea>
+
+    <div class="row wrap gap-s">
+      <label class="field-label inline" for="split">Split by <span class="help" data-tip="How to cut the text into documents.&#10;Blank line: a new document starts after an empty line.&#10;One per line: every line is its own document.&#10;Custom: you type the separator, for example ---">?</span></label>
+      <select id="split">
+        <option value="blank">Blank line</option>
+        <option value="line">One per line</option>
+        <option value="custom">Custom separator</option>
+      </select>
+      <input id="separator" type="text" value="---" size="6" hidden aria-label="Custom separator" data-tip="Text that separates documents, for example --- or ###.">
+    </div>
+
+    <div class="row wrap gap-s">
+      <button id="open-file" class="btn" data-tip="Read a .txt, .md or .csv file from your computer. It is read locally and never uploaded.&#10;Limits: 2 MB and 2,000 documents.&#10;CSV: uses a column named text, content or body if there is one; otherwise joins all columns. One row = one document.">📂 Open .txt / .md / .csv</button>
+      <input id="file-input" type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv" hidden>
+    </div>
+    <p id="file-msg" class="msg" role="status"></p>
+
+    <label class="field-label" for="query">Query <span class="help" data-tip="What you are searching for. Results update as you type.&#10;Try an exact code like ERR-504, or a question in your own words.">?</span></label>
+    <input id="query" type="search" placeholder="Type a search query…" autocomplete="off">
+    <div id="query-tokens" class="tokens" data-tip="The query after text processing. These are the exact words BM25 looks for.&#10;Grey crossed-out words were removed (stopwords)."></div>
+
+    <div id="examples-wrap">
+      <div class="field-label">Example queries <span class="help" data-tip="Queries written for this sample. Each one has relevance labels already filled in, so the evaluation table works straight away.">?</span></div>
+      <ul id="examples" class="examples"></ul>
+    </div>
+  </section>
+
+  <!-- ============ CENTRE: results ============ -->
+  <section class="results-area" aria-label="Results">
+    <div class="results-toolbar">
+      <div class="row gap-s">
+        <label class="field-label inline" for="topk">Show top <span class="help" data-tip="How many results each column shows. Also the k used by the evaluation metrics (Precision@k, Recall@k, nDCG@k).">?</span></label>
+        <select id="topk"><option>3</option><option selected>5</option><option>10</option></select>
+      </div>
+      <div id="timing" class="muted small" data-tip="How long BM25 took to build the index and score every document for this query, in this browser."></div>
+    </div>
+    <div class="columns">
+      <div class="col" id="col-bm25">
+        <div class="col-head bm25">
+          <h3>BM25 <span class="help light" data-tip="Keyword search. Finds documents that contain the same words as the query.&#10;Rare words count more than common ones; repeating a word helps a bit, with diminishing returns; long documents are scaled down.&#10;Same scoring as Elasticsearch / Lucene.">?</span></h3>
+          <span class="col-sub">keyword match</span>
+        </div>
+        <ol class="result-list" id="list-bm25"></ol>
+      </div>
+      <div class="col" id="col-vector">
+        <div class="col-head vector">
+          <h3>Vector <span class="help light" data-tip="Meaning search. A small neural network turns each text into a list of numbers (an embedding).&#10;Texts with similar meaning get similar numbers, even when they use different words.&#10;Score = cosine similarity between the query and the document (from −1 to 1, higher is closer).">?</span></h3>
+          <span class="col-sub" id="vector-sub">embeddings</span>
+        </div>
+        <div id="vector-status" class="vector-status"></div>
+        <ol class="result-list" id="list-vector"></ol>
+      </div>
+      <div class="col" id="col-hybrid">
+        <div class="col-head hybrid">
+          <h3>Hybrid <span class="help light" data-tip="Combines the BM25 list and the vector list into one ranking.&#10;Documents that both methods like rise to the top; documents only one method found can still appear.&#10;Change the method (RRF or weighted) in Settings.">?</span></h3>
+          <span class="col-sub" id="hybrid-sub">RRF</span>
+        </div>
+        <ol class="result-list" id="list-hybrid"></ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT: detail & settings ============ -->
+  <aside class="panel side" aria-label="Details and settings">
+    <div class="tabs" role="tablist">
+      <button role="tab" class="tab active" data-tab="detail" data-tip="Full text of the selected document and why it scored the way it did.">Document detail</button>
+      <button role="tab" class="tab" data-tab="settings" data-tip="BM25 parameters, text processing, embedding model and fusion method.">Settings</button>
+    </div>
+
+    <div class="tab-body" id="tab-detail">
+      <div id="detail-empty" class="empty">Click any result to see its full text and a score breakdown.</div>
+      <div id="detail" hidden></div>
+    </div>
+
+    <div class="tab-body" id="tab-settings" hidden>
+      <h4>BM25</h4>
+      <div class="slider-row">
+        <label for="k1">k1 <span class="help" data-tip="How quickly repeated words stop adding score (term-frequency saturation).&#10;0 = a word counts the same whether it appears once or ten times.&#10;Higher = repeats keep adding more. Default 1.2 (Elasticsearch default).">?</span></label>
+        <input id="k1" type="range" min="0" max="3" step="0.05" value="1.2">
+        <output id="k1-out">1.20</output>
+      </div>
+      <div class="slider-row">
+        <label for="b">b <span class="help" data-tip="How much long documents are penalised (length normalisation).&#10;0 = length is ignored. 1 = scores are fully scaled by length compared with the average.&#10;Default 0.75 (Elasticsearch default). Try it on the Mixed sample with doc 30.">?</span></label>
+        <input id="b" type="range" min="0" max="1" step="0.05" value="0.75">
+        <output id="b-out">0.75</output>
+      </div>
+      <button class="btn small" id="bm25-reset" data-tip="Put k1 and b back to the Elasticsearch defaults (1.2 and 0.75).">Reset to defaults</button>
+
+      <h4>Text processing <span class="help" data-tip="What happens to text before BM25 compares words. Each change applies to both the query and the documents, and you see the effect immediately.">?</span></h4>
+      <label class="check" data-tip="Treat Error and error as the same word. Usually on."><input type="checkbox" id="opt-lowercase" checked> Lowercase</label>
+      <label class="check" data-tip="Split text into words and drop punctuation, so &quot;timeout.&quot; matches &quot;timeout&quot;.&#10;Codes like ERR-504 or v2.3.1 are kept whole and also split into parts (err, 504, v2).&#10;Off = split only on spaces, punctuation stays attached."><input type="checkbox" id="opt-punct" checked> Remove punctuation</label>
+      <label class="check" data-tip="Ignore very common words such as the, a, my, is. They appear everywhere, so they say little about what a document is about."><input type="checkbox" id="opt-stop" checked> Remove stopwords</label>
+      <label class="check" data-tip="Cut words down to a common root with the Porter stemmer, so running, runs and run all become run.&#10;Stems can look odd (ponies → poni); that is normal."><input type="checkbox" id="opt-stem" checked> Stemming (Porter)</label>
+
+      <h4>Embedding model</h4>
+      <select id="model" aria-label="Embedding model"></select>
+      <p id="model-note" class="muted small"></p>
+      <div id="model-controls"></div>
+
+      <h4>Hybrid fusion</h4>
+      <div class="radio-row">
+        <label class="check" data-tip="Reciprocal Rank Fusion. Uses only the positions in each list, not the scores.&#10;Each list gives a document 1 / (k + rank). Robust and needs no tuning. The default in many search engines."><input type="radio" name="fusion" value="rrf" checked> RRF</label>
+        <label class="check" data-tip="Weighted score fusion. Rescales each list's scores to 0–1, then mixes them: α × vector + (1 − α) × BM25.&#10;Raw scores can't be added directly: BM25 scores might be 0–15 while cosine is −1 to 1, so BM25 would drown out the vector score."><input type="radio" name="fusion" value="weighted"> Weighted</label>
+      </div>
+      <div class="slider-row" id="rrfk-row">
+        <label for="rrfk">k <span class="help" data-tip="RRF smoothing constant. Larger k = the gap between rank 1 and rank 2 matters less, so agreement between the two lists matters more.&#10;Default 60 (from the original RRF paper).">?</span></label>
+        <input id="rrfk" type="range" min="1" max="100" step="1" value="60">
+        <output id="rrfk-out">60</output>
+      </div>
+      <div class="slider-row" id="alpha-row" hidden>
+        <label for="alpha">α <span class="help" data-tip="How much to trust vector search. 0 = only BM25, 1 = only vector, 0.5 = equal.">?</span></label>
+        <input id="alpha" type="range" min="0" max="1" step="0.05" value="0.5">
+        <output id="alpha-out">0.50</output>
+      </div>
+      <p class="muted small" data-tip="RRF and weighted fusion both use the top 100 results from each method. A document outside a method's top 100 gets nothing from that method.">Fusion uses the top 100 of each list.</p>
+    </div>
+  </aside>
+</main>
+
+<!-- ============ Evaluation ============ -->
+<section class="panel wide" id="evaluation">
+  <div class="row between wrap">
+    <h2>Evaluation <span class="help" data-tip="How good is each ranking? Mark which documents are relevant to the query (tick the box on a result), and this table scores each method.&#10;Samples come with labels already filled in.">?</span></h2>
+    <div class="row gap-s">
+      <button class="btn small" id="clear-labels" data-tip="Remove all relevance ticks for the current query.">Clear labels for this query</button>
+    </div>
+  </div>
+  <div class="eval-grid">
+    <div>
+      <h4>This query <span id="eval-k" class="muted small"></span></h4>
+      <div id="eval-table"></div>
+    </div>
+    <div>
+      <h4>All labelled queries (average) <span class="help" data-tip="The same metrics averaged over every query that has relevance labels in this dataset (the example queries plus any you labelled).&#10;One query can be luck; the average shows the pattern.">?</span></h4>
+      <div id="eval-all"></div>
+    </div>
+  </div>
+  <ul id="insights" class="insights"></ul>
+</section>
+
+<!-- ============ Export ============ -->
+<section class="panel wide" id="export">
+  <h2>Export <span class="help" data-tip="Take what you set up here into real code, or save your work.">?</span></h2>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-etab="python" data-tip="A Python script that runs the same pipeline: BM25 with the Lucene formula, the same embedding model via sentence-transformers, and RRF with your k.">Python</button>
+    <button class="tab" data-etab="es" data-tip="Index settings for Elasticsearch / OpenSearch with your k1, b and an analyzer that matches your text-processing toggles.">Elasticsearch / OpenSearch</button>
+    <button class="tab" data-etab="workspace" data-tip="Save or open everything: documents, queries, relevance labels and settings, as one JSON file.">Workspace JSON</button>
+    <button class="tab" data-etab="csv" data-tip="The three result lists for the current query as a CSV table (opens in Excel or Google Sheets).">Results CSV</button>
+  </div>
+  <div class="export-actions row gap-s wrap">
+    <button class="btn" id="export-copy" data-tip="Copy the text below to the clipboard.">Copy</button>
+    <button class="btn" id="export-download" data-tip="Save the text below as a file on your computer.">Download</button>
+    <button class="btn" id="workspace-open" hidden data-tip="Open a workspace JSON file you saved earlier. Read locally, never uploaded.">Open workspace…</button>
+    <input type="file" id="workspace-input" accept=".json,application/json" hidden>
+    <button class="btn" id="workspace-reset" hidden data-tip="Forget the auto-saved workspace in this browser and start again with the samples.">Reset everything</button>
+    <span id="export-msg" class="msg" role="status"></span>
+  </div>
+  <pre id="export-code" class="code" tabindex="0"></pre>
+</section>
+
+<!-- ============ Learn: similarity ============ -->
+<section class="panel wide" id="learn">
+  <h2>Learn: similarity metrics <span class="help" data-tip="Embeddings are vectors (arrows). Search engines compare them with cosine similarity, dot product or Euclidean distance.&#10;Drag the arrow tips to see how each measure changes.">?</span></h2>
+  <div class="learn-grid">
+    <div class="canvas-wrap">
+      <canvas id="sim-canvas" width="440" height="440" aria-label="Drag the arrow tips to move the vectors" data-tip="Drag the round tips of the arrows. Q is the query; A and B are two documents."></canvas>
+      <label class="check" data-tip="Scale every arrow to length 1 (onto the circle), like the embedding models here do.&#10;After normalising, cosine, dot product and distance always agree on the ranking."><input type="checkbox" id="sim-normalise"> Normalise vectors (length 1)</label>
+    </div>
+    <div>
+      <table class="sim-table" id="sim-table"></table>
+      <p id="sim-verdict" class="sim-verdict"></p>
+      <p class="muted small">Cosine looks only at the angle. Dot product also grows with length, so a long arrow can win even if it points the wrong way. Euclidean distance measures the gap between the tips (smaller = closer). When every vector has length 1, dot product equals cosine and distance = √(2 − 2·cosine), so all three give the same order.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Docs ============ -->
+<section class="panel wide doc" id="about">
+  <h2>What is this tool for?</h2>
+  <p>It is for people who build search: site search, retrieval for RAG (retrieval-augmented generation), chatbots that answer from your documents, or support tools. Search quality decides whether the right text reaches the user or the language model.</p>
+  <p>It helps you answer questions like:</p>
+  <ul>
+    <li><strong>Why was the wrong document retrieved?</strong> Click it and see exactly which words matched, how much each one counted, and what was missing.</li>
+    <li><strong>Should I use keyword, vector or hybrid search?</strong> See all three side by side on your own text, with numbers (precision, recall, MRR, nDCG) instead of gut feeling.</li>
+    <li><strong>How do I tune BM25?</strong> Move <code>k1</code> and <code>b</code> and watch rankings change instantly, then export the settings to Elasticsearch, OpenSearch or Python.</li>
+  </ul>
+  <p>Rule of thumb: BM25 is great at exact things (names, error codes, version numbers, rare words). Vector search is great at meaning (paraphrases, synonyms, questions phrased differently). Hybrid usually gets the best of both, which is why most production RAG systems use it.</p>
+</section>
+
+<section class="panel wide doc" id="howto">
+  <h2>How to use this tool</h2>
+  <ol class="steps">
+    <li><strong>Pick a sample</strong> from the Dataset menu, or choose "My documents" and paste or open your own.</li>
+    <li><strong>Type a query</strong>, or click one of the example queries.</li>
+    <li><strong>Compare the three columns.</strong> BM25 works straight away. For Vector and Hybrid, click "Load embedding model" once (about 23 MB, cached by your browser afterwards). Arrows like ▲3 show how far a document moved compared with BM25.</li>
+    <li><strong>Click a document</strong> to see why it scored that way: the matching words, the BM25 breakdown, and "Why didn't this match?".</li>
+    <li><strong>Adjust the settings</strong>: <code>k1</code>, <code>b</code>, stemming, stopwords, the embedding model, and the fusion method.</li>
+    <li><strong>Mark relevant documents</strong> with the tick box on each result (samples come pre-labelled).</li>
+    <li><strong>Read the evaluation</strong> to see which method wins for this query and on average.</li>
+    <li><strong>Export</strong> a Python script, Elasticsearch settings, a CSV of results, or a workspace file.</li>
+  </ol>
+</section>
+
+<section class="panel wide doc" id="scoring">
+  <h2>How the scoring works</h2>
+
+  <h3>BM25 (Lucene / Elasticsearch version)</h3>
+  <pre class="formula">IDF(t)      = ln(1 + (N − n_t + 0.5) / (n_t + 0.5))
+score(d, q) = Σ over query terms t:  IDF(t) · tf(t,d) · (k1 + 1) / (tf(t,d) + k1 · (1 − b + b · |d| / avgdl))</pre>
+  <p><code>N</code> = number of documents, <code>n_t</code> = documents that contain the term, <code>tf</code> = how often the term appears in this document, <code>|d|</code> = document length in tokens, <code>avgdl</code> = average length. Each distinct query word is counted once.</p>
+  <p class="example"><strong>Worked example.</strong> 40 documents; "timeout" appears in 2 of them. IDF = ln(1 + (40 − 2 + 0.5) / (2 + 0.5)) = ln(16.4) = 2.80. A document of average length (so the length factor is 1) has "timeout" 3 times. With k1 = 1.2: 2.80 × 3 × 2.2 / (3 + 1.2 × 1) = 2.80 × 1.571 = 4.40. Had it appeared once: 2.80 × 2.2 / 2.2 = 2.80. Three times the word, but only 1.57× the score.</p>
+  <p class="note">Note: the Python library <code>rank_bm25</code> (<code>BM25Okapi</code>) uses a different IDF, ln((N − n + 0.5) / (n + 0.5)), which can go negative, so it replaces low values with an epsilon floor. Its absolute scores (and sometimes its order) differ from Elasticsearch and from this tool. The exported Python script uses the Lucene formula so it matches.</p>
+
+  <h3>Cosine similarity (vector search)</h3>
+  <pre class="formula">cos(q, d) = (q · d) / (|q| · |d|)</pre>
+  <p class="example"><strong>Worked example.</strong> q = (1, 0), d = (0.6, 0.8). q · d = 0.6; |q| = 1, |d| = 1, so cos = 0.6. The models here return vectors of length 1, so cosine is simply the dot product.</p>
+
+  <h3>Reciprocal Rank Fusion (RRF)</h3>
+  <pre class="formula">RRF(d) = Σ over result lists  1 / (k + rank(d))      ranks start at 1, k = 60 by default</pre>
+  <p class="example"><strong>Worked example.</strong> Doc A is #1 in BM25 and #3 in vector: 1/61 + 1/63 = 0.01639 + 0.01587 = 0.03226. Doc B is #2 in vector only: 1/62 = 0.01613. A wins because both methods liked it.</p>
+
+  <h3>Weighted score fusion</h3>
+  <pre class="formula">norm(s) = (s − min) / (max − min)          per list
+hybrid  = α · norm(vector) + (1 − α) · norm(BM25)</pre>
+  <p class="example"><strong>Worked example.</strong> BM25 scores 9, 3, 0 become 1, 0.33, 0. Vector scores 0.8, 0.6, 0.4 become 1, 0.5, 0. A doc with BM25 0.33 and vector 1 at α = 0.5 gets 0.5 × 1 + 0.5 × 0.33 = 0.67.</p>
+
+  <h3>Glossary</h3>
+  <dl class="glossary">
+    <dt>Token</dt><dd>One unit of text after splitting, usually a word. "ERR-504 again" gives the tokens err-504, err, 504, again.</dd>
+    <dt>Stemming</dt><dd>Cutting words to a shared root so different forms match: connected, connecting → connect.</dd>
+    <dt>Stopword</dt><dd>A very common word (the, is, my) that is ignored because it appears almost everywhere.</dd>
+    <dt>IDF</dt><dd>Inverse document frequency. Rare words get a high IDF and count more; common words count less.</dd>
+    <dt>TF</dt><dd>Term frequency: how many times a word appears in a document. In BM25 each extra repeat adds less.</dd>
+    <dt>Document length normalisation</dt><dd>Scaling scores down for long documents (controlled by b), since long texts contain more words by chance.</dd>
+    <dt>Embedding</dt><dd>A list of numbers (here 384 of them) that represents the meaning of a text. Similar meanings give similar lists.</dd>
+    <dt>Cosine similarity</dt><dd>How closely two embeddings point in the same direction, from −1 (opposite) to 1 (same).</dd>
+    <dt>RRF</dt><dd>Reciprocal Rank Fusion: combine rankings by adding 1 / (k + rank) from each list.</dd>
+    <dt>Precision@k</dt><dd>Of the top k results, the share that are relevant.</dd>
+    <dt>Recall@k</dt><dd>Of all relevant documents, the share that made it into the top k.</dd>
+    <dt>MRR</dt><dd>Mean reciprocal rank: 1 / position of the first relevant result (1 if it is first, 0.5 if second…), averaged over queries.</dd>
+    <dt>nDCG</dt><dd>Normalised discounted cumulative gain: rewards relevant results more the higher they appear; 1 = perfect order.</dd>
+  </dl>
+</section>
+
+<footer class="site-footer">
+  Hybrid Search Playground · Runs 100% In Your Browser</a>
+</footer>
+
+<div id="tooltip" role="tooltip" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
