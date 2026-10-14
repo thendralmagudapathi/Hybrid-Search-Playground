@@ -1,0 +1,12 @@
+{
+  "name": "hybrid-search-playground",
+  "version": "1.0.0",
+  "description": "In-browser playground comparing BM25, vector and hybrid search.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
