@@ -1,5 +1,5 @@
 # Hybrid Search Playground
-# Access at: https://thendralmagudapathi.com/tools/hybrid-search-playground
+### Access at: https://thendralmagudapathi.com/tools/hybrid-search-playground
 
 A browser tool for AI engineers that shows how **BM25 keyword search**, **vector (embedding) search** and **hybrid fusion** rank the same documents, and explains *why* each document scored the way it did.
 
